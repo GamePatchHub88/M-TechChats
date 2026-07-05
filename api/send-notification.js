@@ -55,11 +55,11 @@ export default async function handler(req, res) {
       return res.status(200).json({ skipped: true });
     }
 
-    const oneSignalRes = await fetch("https://onesignal.com/api/v1/notifications", {
+    const oneSignalRes = await fetch("https://api.onesignal.com/notifications", {
       method: "POST",
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        Authorization: `Basic ${REST_API_KEY}`,
+        Authorization: `Key ${REST_API_KEY}`,
       },
       body: JSON.stringify({
         app_id: APP_ID,
