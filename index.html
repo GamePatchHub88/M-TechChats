@@ -2991,6 +2991,17 @@
       #onlineCountBadge { font-size: 10px; opacity: 0.85; }
 
     </style>
+    <!-- OneSignal: إشعارات Push تصل حتى لو الموقع مقفول -->
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      OneSignalDeferred.push(async function (OneSignal) {
+        await OneSignal.init({
+          appId: "29d0183f-e2d9-4d05-bc0c-f364a288763f",
+        });
+        window.__oneSignalReady = true;
+      });
+    </script>
   </head>
   <body>
     <div class="network-status" id="networkStatus">
@@ -4925,15 +4936,10 @@
 
       async function requestPushPermission() {
         document.getElementById("notifPermBanner").classList.remove("show");
-        if (!("Notification" in window)) {
-          showNotification("تنبيه", "متصفحك لا يدعم الإشعارات", "warning");
-          return;
-        }
-        const perm = await Notification.requestPermission();
-        if (perm === "granted") {
+        await subscribeToPush();
+        if (window.OneSignal && OneSignal.Notifications.permission === true) {
           showNotification("تم", "✅ تم تفعيل الإشعارات!", "message");
           if (navigator.vibrate) navigator.vibrate(200);
-          subscribeToPush();
         } else {
           showNotification(
             "تنبيه",
@@ -5029,56 +5035,25 @@
         }
       }
 
-      // ==== إشعارات الدفع (Web Push) — تصل للهاتف حتى والموقع مغلق ====
-      // يتطلب: 1) رفع ملف sw.js في جذر الموقع  2) مفتاح VAPID عام داخل config.js
-      //         كـ APP_CONFIG.vapidPublicKey  3) دالة سيرفر (Edge Function) لإرسال
-      //         الإشعار الفعلي عند وصول رسالة جديدة (راجع ملف supabase-send-push-function.ts المرفق)
-      function urlBase64ToUint8Array(base64String) {
-        const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-        const base64 = (base64String + padding)
-          .replace(/-/g, "+")
-          .replace(/_/g, "/");
-        const rawData = atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; i++)
-          outputArray[i] = rawData.charCodeAt(i);
-        return outputArray;
+      // ==== إشعارات الدفع عبر OneSignal — تصل للهاتف حتى والموقع مغلق ====
+      async function waitForOneSignal() {
+        let tries = 0;
+        while (!window.__oneSignalReady && tries < 50) {
+          await new Promise((r) => setTimeout(r, 100));
+          tries++;
+        }
       }
 
       async function subscribeToPush() {
         try {
           if (!currentUser) return;
-          if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
-          if (location.protocol !== "https:") return; // Push يعمل فقط عبر HTTPS
-          const vapidKey = APP_CONFIG?.vapidPublicKey;
-          if (!vapidKey) return; // لم يتم ضبط مفتاح VAPID بعد في config.js
-
-          if (Notification.permission === "default") {
-            const perm = await Notification.requestPermission();
-            if (perm !== "granted") return;
+          await waitForOneSignal();
+          if (!window.OneSignal) return;
+          // نربط حساب المستخدم بمعرّف OneSignal حتى نقدر نستهدفه بالإشعار لاحقًا
+          await OneSignal.login(String(currentUser.id));
+          if (OneSignal.Notifications.permission !== true) {
+            await OneSignal.Notifications.requestPermission();
           }
-          if (Notification.permission !== "granted") return;
-
-          const registration = await navigator.serviceWorker.ready.catch(
-            () => navigator.serviceWorker.register("/sw.js"),
-          );
-          let subscription = await registration.pushManager.getSubscription();
-          if (!subscription) {
-            subscription = await registration.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: urlBase64ToUint8Array(vapidKey),
-            });
-          }
-
-          await supabaseClient.from("push_subscriptions").upsert(
-            {
-              user_id: currentUser.id,
-              endpoint: subscription.endpoint,
-              subscription: subscription.toJSON(),
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "endpoint" },
-          );
         } catch (e) {
           console.warn("push subscribe failed:", e);
         }
@@ -5086,17 +5061,22 @@
 
       async function unsubscribeFromPush() {
         try {
-          if (!("serviceWorker" in navigator)) return;
-          const registration = await navigator.serviceWorker.getRegistration();
-          const subscription = await registration?.pushManager.getSubscription();
-          if (subscription) {
-            await supabaseClient
-              .from("push_subscriptions")
-              .delete()
-              .eq("endpoint", subscription.endpoint);
-            await subscription.unsubscribe();
-          }
+          if (!window.OneSignal) return;
+          await OneSignal.logout();
         } catch (e) {}
+      }
+
+      // يُستدعى بعد إرسال أي رسالة، لإشعار الطرف الآخر حتى لو موقعه مغلق تمامًا
+      async function notifyNewMessage({ toUserId, title, body }) {
+        try {
+          await fetch("/api/send-notification", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ toUserId: String(toUserId), title, body }),
+          });
+        } catch (e) {
+          console.warn("notify failed:", e);
+        }
       }
 
       function mobileNavChats() {
@@ -6922,6 +6902,19 @@
                 };
           const { error } = await supabaseClient.from(table).insert([payload]);
           if (error) throw error;
+          if (selectedType === "group") {
+            notifyNewMessage({
+              toUserId: `group_${selectedChat.id}`,
+              title: `${currentUser.name} في ${selectedChat.name}`,
+              body: messageContent,
+            });
+          } else {
+            notifyNewMessage({
+              toUserId: selectedChat.id,
+              title: currentUser.name,
+              body: messageContent,
+            });
+          }
           if (input) input.value = "";
           selectedMediaFile = null;
           replyingTo = null;
@@ -8784,7 +8777,7 @@
         loadDarkMode();
         initNetworkStatus();
 
-        // SW و manifest - https فقط، وبعد التأكد من وجود الملفات فعليًا
+        // manifest - https فقط، وبعد التأكد من وجود الملف فعليًا
         if (location.protocol === "https:") {
           try {
             const manifestCheck = await fetch("/manifest.json", { method: "HEAD" });
@@ -8795,18 +8788,7 @@
               document.head.appendChild(ml);
             }
           } catch (e) {}
-
-          if ("serviceWorker" in navigator) {
-            try {
-              const swCheck = await fetch("/sw.js", { method: "HEAD" });
-              if (swCheck.ok) {
-                await navigator.serviceWorker.register("/sw.js");
-                if (currentUser && Notification.permission === "granted") {
-                  subscribeToPush();
-                }
-              }
-            } catch (e) {}
-          }
+          // ملف OneSignalSDKWorker.js يتم تسجيله تلقائيًا بواسطة مكتبة OneSignal نفسها
         }
         // فافيكون inline عند التشغيل المحلي
         if (location.protocol !== "https:") {
