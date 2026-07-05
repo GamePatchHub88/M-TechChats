@@ -132,6 +132,7 @@
         --text-sub: #7c8792;
         --border: #e2e6ea;
         --header-bg: linear-gradient(120deg, #0f8a7a, #0c6d61);
+        --header-solid: #0f8a7a;
         --shadow: rgba(15, 138, 122, 0.1);
         --overlay: rgba(0, 0, 0, 0.5);
         --transition: all 0.3s ease;
@@ -147,6 +148,7 @@
         --text-sub: #94a1b0;
         --border: #262f3d;
         --header-bg: linear-gradient(120deg, #0c6d61, #0a5a50);
+        --header-solid: #0c6d61;
         --shadow: rgba(0, 0, 0, 0.35);
         --overlay: rgba(0, 0, 0, 0.7);
         --light-bg: #1c2432;
@@ -1125,8 +1127,9 @@
         align-items: center;
         background: linear-gradient(
           135deg,
-          var(--primary) 0%,
-          var(--secondary) 100%
+          #0f8a7a 0%,
+          #0c6d61 45%,
+          #6d28d9 100%
         );
         overflow-y: auto;
         padding: 20px;
@@ -1469,6 +1472,8 @@
         padding: 15px;
         background: var(--header-bg);
         color: white;
+        border-bottom: 3px solid #6d28d9;
+        box-shadow: 0 4px 14px rgba(15, 138, 122, 0.35);
       }
       .sidebar-header h2 {
         font-size: 18px;
@@ -1578,7 +1583,7 @@
         width: 45px;
         height: 45px;
         border-radius: 50%;
-        background: linear-gradient(135deg, var(--primary), var(--secondary));
+        background: linear-gradient(135deg, #0f8a7a, #6d28d9);
         color: white;
         display: flex;
         align-items: center;
@@ -1918,7 +1923,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        border: 2px solid var(--header-bg);
+        border: 2px solid var(--header-solid);
         animation: badgePop 0.3s ease;
       }
       /* علامة "لم يُرد" صغيرة بجوار آخر رسالة */
@@ -2925,7 +2930,7 @@
         color: white; border-radius: 50%; width: 16px; height: 16px;
         font-size: 9px; font-weight: 900; display: flex;
         align-items: center; justify-content: center;
-        border: 2px solid var(--header-bg);
+        border: 2px solid var(--header-solid);
       }
 
       /* Filter bar */
