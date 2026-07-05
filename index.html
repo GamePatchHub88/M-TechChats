@@ -4710,7 +4710,7 @@
       let sidebarOpen = true;
       let currentFilter = 'all';
       let unrepliedContacts = new Set();
-      let mutedChats = JSON.parse(localStorage.getItem('mtech_muted') || '[]');
+      let mutedChats = [];
       let isMobile = () => window.innerWidth <= 768;
 
       let mediaRecorder = null;
@@ -5244,6 +5244,7 @@
           showNotification("تم", "⭐ تم حفظ الرسالة كمفضلة", "message", 2000);
         }
         localStorage.setItem(starKey(), JSON.stringify(starredMessages));
+        saveStarredToServer();
         // إعادة رسم الشات لإظهار النجمة فوراً
         renderChat();
         const _mc = document.getElementById("messagesContainer");
@@ -5598,8 +5599,6 @@
       }
       async function openProfile() {
         closeSidebar();
-        const saved = localStorage.getItem(starKey());
-        if (saved) starredMessages = JSON.parse(saved);
         document.getElementById("starredCount").textContent =
           starredMessages.length;
         const list = document.getElementById("starredMessagesList");
@@ -5663,6 +5662,12 @@
           const saved = localStorage.getItem(starKey());
           if (saved) starredMessages = JSON.parse(saved);
           try { localReactions = JSON.parse(localStorage.getItem(reactKey()) || '{}'); } catch(e) { localReactions = {}; }
+          starredMessages = Array.isArray(currentUser.starred_messages)
+            ? currentUser.starred_messages
+            : [];
+          mutedChats = Array.isArray(currentUser.muted_chats)
+            ? currentUser.muted_chats
+            : [];
           document.getElementById("loginPage").classList.remove("active");
           document.getElementById("appPage").classList.add("active");
           updateHeaderAvatar();
@@ -6027,11 +6032,36 @@
         document.addEventListener('click', () => menu.remove(), {once:true});
       }
 
+      async function saveStarredToServer() {
+        if (!currentUser) return;
+        try {
+          await supabaseClient
+            .from("users")
+            .update({ starred_messages: starredMessages })
+            .eq("id", currentUser.id);
+        } catch (e) {
+          console.warn("saveStarredToServer failed:", e.message);
+        }
+      }
+
+      async function saveMutedToServer() {
+        if (!currentUser) return;
+        try {
+          await supabaseClient
+            .from("users")
+            .update({ muted_chats: mutedChats })
+            .eq("id", currentUser.id);
+        } catch (e) {
+          console.warn("saveMutedToServer failed:", e.message);
+        }
+      }
+
       function toggleMuteChat(contactId) {
         const idx = mutedChats.indexOf(contactId);
         if (idx > -1) mutedChats.splice(idx, 1);
         else mutedChats.push(contactId);
         localStorage.setItem('mtech_muted', JSON.stringify(mutedChats));
+        saveMutedToServer();
         renderContacts();
         showNotification('🔇', idx > -1 ? 'تم إلغاء كتم الإشعارات' : 'تم كتم الإشعارات', 'message', 2000);
       }
@@ -8034,28 +8064,44 @@
         const text = document.getElementById("announcementText").value.trim();
         const target = document.getElementById("announcementTarget").value;
         if (!title || !text) return;
-        const announcement = {
-          id: Date.now(),
-          title,
-          text,
-          target,
-          sender: currentUser.name,
-          created_at: new Date().toISOString(),
-        };
-        announcements.unshift(announcement);
-        localStorage.setItem(
-          "mtech_announcements",
-          JSON.stringify(announcements),
-        );
-        closeModal("announcementModal");
-        renderAnnouncementsList();
-        showNotification(`📢 ${title}`, text, "warning", 8000);
-        showNotification("تم", "✅ تم إرسال الإعلان!", "message");
-        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        try {
+          showLoading(true);
+          const { error } = await supabaseClient.from("announcements").insert([
+            {
+              title,
+              text,
+              target,
+              sender: currentUser.name,
+              sender_id: currentUser.id,
+            },
+          ]);
+          if (error) throw error;
+          closeModal("announcementModal");
+          await renderAnnouncementsList();
+          showNotification(`📢 ${title}`, text, "warning", 8000);
+          showNotification("تم", "✅ تم إرسال الإعلان!", "message");
+          if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        } catch (e) {
+          showNotification(
+            "خطأ",
+            "تأكد من وجود جدول announcements: " + e.message,
+            "error",
+            6000,
+          );
+        } finally {
+          showLoading(false);
+        }
       }
-      function renderAnnouncementsList() {
-        const saved = localStorage.getItem("mtech_announcements");
-        if (saved) announcements = JSON.parse(saved);
+      async function renderAnnouncementsList() {
+        try {
+          const { data } = await supabaseClient
+            .from("announcements")
+            .select("*")
+            .order("created_at", { ascending: false });
+          announcements = data || [];
+        } catch (e) {
+          announcements = [];
+        }
         const container = document.getElementById("announcementsList");
         if (!container) return;
         if (announcements.length === 0) {
@@ -8066,17 +8112,18 @@
         container.innerHTML = announcements
           .map(
             (a) =>
-              `<div style="background:linear-gradient(135deg,#fff8e1,#fff3cd);border:1px solid #ffe082;border-radius:12px;padding:15px;margin-bottom:12px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;"><div><strong style="font-family:var(--font-display);font-size:15px;color:#e65100;">📢 ${a.title}</strong><span style="background:#e65100;color:white;padding:2px 7px;border-radius:5px;font-size:10px;margin-right:8px;">${a.target === "all" ? "للجميع" : "للمشرفين"}</span></div><button class="btn-small" style="background:var(--red);" onclick="deleteAnnouncement(${a.id})">🗑️</button></div><p style="color:#795548;font-size:14px;font-family:var(--font-main);line-height:1.6;">${a.text}</p><div style="color:#a1887f;font-size:11px;font-family:var(--font-main);margin-top:8px;">📅 ${new Date(a.created_at).toLocaleDateString("ar-EG")} • بقلم: ${a.sender}</div></div>`,
+              `<div style="background:linear-gradient(135deg,#fff8e1,#fff3cd);border:1px solid #ffe082;border-radius:12px;padding:15px;margin-bottom:12px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;"><div><strong style="font-family:var(--font-display);font-size:15px;color:#e65100;">📢 ${a.title}</strong><span style="background:#e65100;color:white;padding:2px 7px;border-radius:5px;font-size:10px;margin-right:8px;">${a.target === "all" ? "للجميع" : "للمشرفين"}</span></div><button class="btn-small" style="background:var(--red);" onclick="deleteAnnouncement('${a.id}')">🗑️</button></div><p style="color:#795548;font-size:14px;font-family:var(--font-main);line-height:1.6;">${a.text}</p><div style="color:#a1887f;font-size:11px;font-family:var(--font-main);margin-top:8px;">📅 ${new Date(a.created_at).toLocaleDateString("ar-EG")} • بقلم: ${a.sender}</div></div>`,
           )
           .join("");
       }
-      function deleteAnnouncement(id) {
-        announcements = announcements.filter((a) => a.id !== id);
-        localStorage.setItem(
-          "mtech_announcements",
-          JSON.stringify(announcements),
-        );
-        renderAnnouncementsList();
+      async function deleteAnnouncement(id) {
+        try {
+          await supabaseClient.from("announcements").delete().eq("id", id);
+          announcements = announcements.filter((a) => a.id !== id);
+          renderAnnouncementsList();
+        } catch (e) {
+          showNotification("خطأ", e.message, "error");
+        }
       }
 
       function closeModal(modalId) {
@@ -8207,19 +8254,41 @@
             }
             await loadContacts();
             updateFilterBadges();
-            const saved = localStorage.getItem("mtech_announcements");
-            if (saved) {
-              const anns = JSON.parse(saved);
-              const seenKey = "mtech_seen_ann_" + (currentUser?.id || "");
-              const seen = JSON.parse(localStorage.getItem(seenKey) || "[]");
-              anns.forEach((a) => {
-                if (!seen.includes(a.id)) {
-                  seen.push(a.id);
-                  showNotification(`📢 ${a.title}`, a.text, "warning", 10000);
-                  sendBrowserNotification(`📢 ${a.title}`, a.text);
+            try {
+              const { data: anns } = await supabaseClient
+                .from("announcements")
+                .select("*")
+                .order("created_at", { ascending: false })
+                .limit(20);
+              if (anns && anns.length > 0) {
+                const seen = Array.isArray(currentUser.seen_announcements)
+                  ? currentUser.seen_announcements
+                  : [];
+                let newSeen = [...seen];
+                let hasNew = false;
+                anns.forEach((a) => {
+                  if (!seen.includes(a.id)) {
+                    if (
+                      a.target === "all" ||
+                      (a.target === "admins" && currentUser.is_admin)
+                    ) {
+                      showNotification(`📢 ${a.title}`, a.text, "warning", 10000);
+                      sendBrowserNotification(`📢 ${a.title}`, a.text);
+                    }
+                    newSeen.push(a.id);
+                    hasNew = true;
+                  }
+                });
+                if (hasNew) {
+                  currentUser.seen_announcements = newSeen;
+                  await supabaseClient
+                    .from("users")
+                    .update({ seen_announcements: newSeen })
+                    .eq("id", currentUser.id);
                 }
-              });
-              localStorage.setItem(seenKey, JSON.stringify(seen));
+              }
+            } catch (e) {
+              console.warn("announcements check failed:", e.message);
             }
           } catch (e) {
             console.error(e);
@@ -8441,6 +8510,12 @@
               const saved = localStorage.getItem(starKey());
               if (saved) starredMessages = JSON.parse(saved);
               try { localReactions = JSON.parse(localStorage.getItem(reactKey()) || '{}'); } catch(e) { localReactions = {}; }
+              starredMessages = Array.isArray(currentUser.starred_messages)
+                ? currentUser.starred_messages
+                : [];
+              mutedChats = Array.isArray(currentUser.muted_chats)
+                ? currentUser.muted_chats
+                : [];
               document.getElementById("landingPage").classList.remove("active");
               document.getElementById("appPage").classList.add("active");
               updateHeaderAvatar();
