@@ -3850,7 +3850,7 @@
       <!-- MODALS -->
       <!-- Generic modal للعرض العام -->
       <div class="modal" id="genericModal">
-        <div class="modal-content" style="max-width:500px;">
+        <div class="modal-content" style="max-width:640px;">
           <div class="modal-header">
             <h2 id="genericModalTitle">معلومات</h2>
             <button onclick="closeModal('genericModal')">✕</button>
@@ -7331,6 +7331,121 @@
         showNotification("تم", "📥 تم تصدير المستخدمين بنجاح", "message");
       }
 
+      async function openUserDetails(userId) {
+        const user = allUsers.find((u) => u.id === userId);
+        if (!user) return;
+        showModal("👁️ تفاصيل المستخدم", `<div style="padding:16px;text-align:center;font-family:var(--font-main);">جاري التحميل...</div>`);
+        try {
+          const [
+            { data: sentMsgs },
+            { data: recvMsgs },
+            { data: groupMsgs },
+            { data: userGroups },
+          ] = await Promise.all([
+            supabaseClient
+              .from("messages")
+              .select("*")
+              .eq("sender_id", userId)
+              .order("created_at", { ascending: false }),
+            supabaseClient
+              .from("messages")
+              .select("*")
+              .eq("receiver_id", userId),
+            supabaseClient
+              .from("group_messages")
+              .select("*")
+              .eq("sender_id", userId)
+              .order("created_at", { ascending: false }),
+            supabaseClient
+              .from("groups")
+              .select("id,name")
+              .contains("members", [userId]),
+          ]);
+
+          const allSent = [...(sentMsgs || []), ...(groupMsgs || [])];
+          const media = allSent.filter(
+            (m) => m.file_url && ["image", "video", "voice"].includes(m.message_type),
+          );
+          const images = media.filter((m) => m.message_type === "image");
+          const videos = media.filter((m) => m.message_type === "video");
+          const voices = media.filter((m) => m.message_type === "voice");
+          const totalMsgs = allSent.length + (recvMsgs?.length || 0);
+
+          const avatarHTML = user.avatar_url
+            ? `<img src="${user.avatar_url}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;">`
+            : `<div class="avatar" style="width:80px;height:80px;font-size:26px;margin:0 auto;">${user.name.substring(0, 2).toUpperCase()}</div>`;
+
+          const roleBadge = isSuperAdmin(user)
+            ? `<span class="super-admin-badge">مدير أعلى</span>`
+            : user.is_admin
+              ? `<span class="mod-badge">مشرف</span>`
+              : "👤 عضو عادي";
+
+          let mediaGalleryHTML = "";
+          if (images.length > 0) {
+            mediaGalleryHTML += `<h4 style="margin:10px 0 6px;font-size:12px;color:var(--text-sub);">📷 الصور (${images.length})</h4>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:6px;">
+                ${images.slice(0, 24).map(m => `<img src="${m.file_url}" style="width:100%;height:70px;object-fit:cover;border-radius:8px;cursor:pointer;" onclick="openLightbox('${m.file_url}','صورة')" loading="lazy">`).join("")}
+              </div>`;
+          }
+          if (videos.length > 0) {
+            mediaGalleryHTML += `<h4 style="margin:14px 0 6px;font-size:12px;color:var(--text-sub);">🎥 الفيديوهات (${videos.length})</h4>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px;">
+                ${videos.slice(0, 12).map(m => `<video src="${m.file_url}" style="width:100%;height:80px;object-fit:cover;border-radius:8px;" controls></video>`).join("")}
+              </div>`;
+          }
+          if (voices.length > 0) {
+            mediaGalleryHTML += `<h4 style="margin:14px 0 6px;font-size:12px;color:var(--text-sub);">🎙️ الرسائل الصوتية (${voices.length})</h4>
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                ${voices.slice(0, 15).map(m => `<audio src="${m.file_url}" controls style="width:100%;height:32px;"></audio>`).join("")}
+              </div>`;
+          }
+          if (!mediaGalleryHTML) {
+            mediaGalleryHTML = `<p style="color:var(--text-sub);font-size:13px;text-align:center;padding:14px;">لا توجد وسائط مرسلة من هذا المستخدم</p>`;
+          }
+
+          const groupsHTML = (userGroups || []).length
+            ? (userGroups || []).map(g => `<span style="background:var(--light-bg);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:12px;margin:2px;display:inline-block;">👥 ${g.name}</span>`).join("")
+            : `<span style="color:var(--text-sub);font-size:12px;">لا يوجد جروبات</span>`;
+
+          const html = `<div style="padding:16px;font-family:var(--font-main);">
+            <div style="text-align:center;margin-bottom:16px;">
+              ${avatarHTML}
+              <div style="font-size:17px;font-weight:800;margin-top:8px;">${user.name} ${roleBadge}</div>
+              <div style="font-size:12px;color:var(--text-sub);">@${user.username}</div>
+            </div>
+            <div class="info-section">
+              <h4>🔐 بيانات الدخول</h4>
+              <div class="info-row"><span class="info-icon">👤</span><span>اسم المستخدم: <b>${user.username}</b></span></div>
+              <div class="info-row"><span class="info-icon">🔑</span><span>كلمة المرور: <b style="font-family:monospace;">${user.password || "-"}</b></span></div>
+              <div class="info-row"><span class="info-icon">📞</span><span>الهاتف: <b>${user.phone || "-"}</b></span></div>
+              ${user.email ? `<div class="info-row"><span class="info-icon">📧</span><span>${user.email}</span></div>` : ""}
+              ${user.bio ? `<div class="info-row"><span class="info-icon">📝</span><span>${user.bio}</span></div>` : ""}
+            </div>
+            <div class="info-section">
+              <h4>📊 نشاط المستخدم</h4>
+              <div class="info-row"><span class="info-icon">💬</span><span>إجمالي الرسائل: <b>${totalMsgs}</b></span></div>
+              <div class="info-row"><span class="info-icon">📤</span><span>رسائل مُرسلة: <b>${allSent.length}</b></span></div>
+              <div class="info-row"><span class="info-icon">📥</span><span>رسائل مُستلمة: <b>${recvMsgs?.length || 0}</b></span></div>
+              <div class="info-row"><span class="info-icon">🖼️</span><span>ملفات وسائط مُرسلة: <b>${media.length}</b></span></div>
+              <div class="info-row"><span class="info-icon">${user.is_online ? "🟢" : "⚪"}</span><span>الحالة: <b>${user.is_online ? "متصل الآن" : "غير متصل"}</b></span></div>
+              ${user.is_banned ? `<div class="info-row"><span class="info-icon">🚫</span><span style="color:#c62828;font-weight:700;">الحساب محظور</span></div>` : ""}
+            </div>
+            <div class="info-section">
+              <h4>👥 الجروبات المنضم إليها</h4>
+              <div>${groupsHTML}</div>
+            </div>
+            <div class="info-section">
+              <h4>🗂️ الوسائط الخاصة بالمستخدم</h4>
+              ${mediaGalleryHTML}
+            </div>
+          </div>`;
+          showModal("👁️ تفاصيل المستخدم", html);
+        } catch (e) {
+          showModal("خطأ", `<div style="padding:16px;color:var(--red);">فشل تحميل التفاصيل: ${e.message}</div>`);
+        }
+      }
+
       function switchAdminTab(tab) {
         document
           .querySelectorAll(".admin-tab")
@@ -7414,10 +7529,10 @@
                 : "";
             const actionBtn =
               user.id !== currentUser.id && !isSuperAdmin(user)
-                ? `${banBtn}<button class="btn-small" onclick="deleteUser('${user.id}')">🗑️ حذف</button>`
+                ? `<button class="btn-small btn-info" onclick="openUserDetails('${user.id}')">👁️ التفاصيل</button>${banBtn}<button class="btn-small" onclick="deleteUser('${user.id}')">🗑️ حذف</button>`
                 : isSuperAdmin(user)
-                  ? `<span style="color:#b71c1c;font-size:11px;font-weight:700;">🔒 محمي</span>`
-                  : "-";
+                  ? `<button class="btn-small btn-info" onclick="openUserDetails('${user.id}')">👁️ التفاصيل</button><span style="color:#b71c1c;font-size:11px;font-weight:700;">🔒 محمي</span>`
+                  : `<button class="btn-small btn-info" onclick="openUserDetails('${user.id}')">👁️ التفاصيل</button>`;
             const bannedBadge = user.is_banned
               ? `<span class="status-badge" style="background:#ffebee;color:#c62828;margin-right:4px;">🚫 محظور</span>`
               : "";
