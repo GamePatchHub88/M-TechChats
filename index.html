@@ -3620,6 +3620,18 @@
                 >
                   🗑️ حذف رسائل أقدم من 30 يوم
                 </button>
+                <button
+                  style="background: #00897b"
+                  onclick="loadAdminData();showNotification('تم','🔄 تم تحديث الإحصائيات','message',2000)"
+                >
+                  🔄 تحديث الإحصائيات
+                </button>
+                <button
+                  style="background: #37474f"
+                  onclick="exportUsersCSV()"
+                >
+                  📥 تصدير المستخدمين CSV
+                </button>
               </div>
             </div>
           </div>
@@ -3661,6 +3673,10 @@
                   </button>
                 </div>
               </h3>
+              <div style="margin-bottom:15px;">
+                <input type="text" id="userSearchInput" placeholder="🔍 ابحث بالاسم أو اسم المستخدم..." oninput="filterUsersTable(this.value)"
+                  style="width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:10px;font-family:var(--font-main);font-size:14px;background:var(--bg-page);color:var(--text-main);"/>
+              </div>
               <div style="overflow-x: auto">
                 <table>
                   <thead>
@@ -5626,6 +5642,16 @@
             return;
           }
           currentUser = data[0];
+          if (currentUser.is_banned) {
+            showNotification(
+              "محظور",
+              "🚫 هذا الحساب محظور من قبل الإدارة",
+              "error",
+              6000,
+            );
+            currentUser = null;
+            return;
+          }
           await supabaseClient
             .from("users")
             .update({ is_online: true })
@@ -7163,6 +7189,76 @@
           showLoading(false);
         }
       }
+      function filterUsersTable(query) {
+        const q = query.trim().toLowerCase();
+        document.querySelectorAll("#usersTable tr").forEach((tr) => {
+          const name = tr.getAttribute("data-name") || "";
+          const username = tr.getAttribute("data-username") || "";
+          tr.style.display =
+            !q || name.includes(q) || username.includes(q) ? "" : "none";
+        });
+      }
+
+      async function toggleBanUser(userId, isCurrentlyBanned) {
+        const target = allUsers.find((u) => u.id === userId);
+        if (target && isSuperAdmin(target)) {
+          showNotification("خطأ", "🔒 لا يمكن حظر المدير الأعلى", "error");
+          return;
+        }
+        const action = isCurrentlyBanned ? "رفع الحظر عن" : "حظر";
+        if (!confirm(`هل تريد ${action} هذا المستخدم؟`)) return;
+        try {
+          showLoading(true);
+          await supabaseClient
+            .from("users")
+            .update({ is_banned: !isCurrentlyBanned })
+            .eq("id", userId);
+          showNotification(
+            "تم",
+            isCurrentlyBanned ? "✅ تم رفع الحظر" : "🚫 تم حظر المستخدم",
+            "message",
+          );
+          loadAllUsers();
+        } catch (e) {
+          showNotification(
+            "خطأ",
+            "تأكد من وجود عمود is_banned في جدول users: " + e.message,
+            "error",
+            6000,
+          );
+        } finally {
+          showLoading(false);
+        }
+      }
+
+      function exportUsersCSV() {
+        if (!allUsers || allUsers.length === 0) {
+          showNotification("تنبيه", "لا يوجد مستخدمون لتصديرهم", "warning");
+          return;
+        }
+        const headers = ["الاسم", "اسم المستخدم", "الهاتف", "متصل", "مشرف", "محظور"];
+        const rows = allUsers.map((u) => [
+          u.name || "",
+          u.username || "",
+          u.phone || "",
+          u.is_online ? "نعم" : "لا",
+          u.is_admin ? "نعم" : "لا",
+          u.is_banned ? "نعم" : "لا",
+        ]);
+        let csv = "\uFEFF" + headers.join(",") + "\n";
+        rows.forEach((r) => {
+          csv += r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",") + "\n";
+        });
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `mtech-users-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showNotification("تم", "📥 تم تصدير المستخدمين بنجاح", "message");
+      }
+
       function switchAdminTab(tab) {
         document
           .querySelectorAll(".admin-tab")
@@ -7233,18 +7329,27 @@
           tbody.innerHTML = "";
           allUsers.forEach((user) => {
             const tr = document.createElement("tr");
+            tr.setAttribute("data-name", (user.name || "").toLowerCase());
+            tr.setAttribute("data-username", (user.username || "").toLowerCase());
             const roleBadge = isSuperAdmin(user)
               ? `<span class="super-admin-badge">مدير أعلى</span>`
               : user.is_admin
                 ? `<span class="mod-badge">مشرف</span>`
                 : "👤 عضو";
+            const banBtn =
+              user.id !== currentUser.id && !isSuperAdmin(user)
+                ? `<button class="btn-small ${user.is_banned ? "btn-success" : "btn-warning"}" onclick="toggleBanUser('${user.id}',${!!user.is_banned})">${user.is_banned ? "✅ رفع الحظر" : "🚫 حظر"}</button>`
+                : "";
             const actionBtn =
               user.id !== currentUser.id && !isSuperAdmin(user)
-                ? `<button class="btn-small" onclick="deleteUser('${user.id}')">🗑️ حذف</button>`
+                ? `${banBtn}<button class="btn-small" onclick="deleteUser('${user.id}')">🗑️ حذف</button>`
                 : isSuperAdmin(user)
                   ? `<span style="color:#b71c1c;font-size:11px;font-weight:700;">🔒 محمي</span>`
                   : "-";
-            tr.innerHTML = `<td>${user.name}</td><td>@${user.username}</td><td><span class="status-badge ${user.is_online ? "status-online" : "status-offline"}">${user.is_online ? "🟢 متصل" : "⚪ غير متصل"}</span></td><td>${roleBadge}</td><td>${actionBtn}</td>`;
+            const bannedBadge = user.is_banned
+              ? `<span class="status-badge" style="background:#ffebee;color:#c62828;margin-right:4px;">🚫 محظور</span>`
+              : "";
+            tr.innerHTML = `<td>${user.name}</td><td>@${user.username}</td><td>${bannedBadge}<span class="status-badge ${user.is_online ? "status-online" : "status-offline"}">${user.is_online ? "🟢 متصل" : "⚪ غير متصل"}</span></td><td>${roleBadge}</td><td>${actionBtn}</td>`;
             tbody.appendChild(tr);
           });
         } catch (e) {
@@ -8262,14 +8367,24 @@
         loadDarkMode();
         initNetworkStatus();
 
-        // SW و manifest - https فقط
+        // SW و manifest - https فقط، وبعد التأكد من وجود الملفات فعليًا
         if (location.protocol === "https:") {
+          try {
+            const manifestCheck = await fetch("/manifest.json", { method: "HEAD" });
+            if (manifestCheck.ok) {
+              const ml = document.createElement("link");
+              ml.rel = "manifest";
+              ml.href = "/manifest.json";
+              document.head.appendChild(ml);
+            }
+          } catch (e) {}
+
           if ("serviceWorker" in navigator) {
-            try { await navigator.serviceWorker.register("/sw.js"); } catch(e){}
+            try {
+              const swCheck = await fetch("/sw.js", { method: "HEAD" });
+              if (swCheck.ok) await navigator.serviceWorker.register("/sw.js");
+            } catch (e) {}
           }
-          const ml = document.createElement("link");
-          ml.rel = "manifest"; ml.href = "/manifest.json";
-          document.head.appendChild(ml);
         }
         // فافيكون inline عند التشغيل المحلي
         if (location.protocol !== "https:") {
