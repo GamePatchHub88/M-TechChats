@@ -2268,12 +2268,18 @@
         vertical-align: middle;
         margin-right: 3px;
         line-height: 0;
+        transform: translateY(-1px);
       }
       .verified-badge svg {
-        width: 15px;
-        height: 15px;
+        width: 16px;
+        height: 16px;
         display: block;
-        filter: drop-shadow(0 1px 1px rgba(0,0,0,0.15));
+        filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2));
+      }
+      .verified-badge.admin-verified-badge svg {
+        width: 17px;
+        height: 17px;
+        filter: drop-shadow(0 1px 2px rgba(255,143,0,0.35));
       }
       .verified-name {
         color: #1d9bf0;
@@ -4717,6 +4723,19 @@
 
       let supabaseClient = null;
       let currentUser = null;
+
+      // شارة موحّدة: شارة ذهبية للمدير، وشارة زرقاء للحساب الموثّق
+      function renderBadge(user, extraStyle) {
+        if (!user) return "";
+        const style = extraStyle ? ` style="${extraStyle}"` : "";
+        if (user.is_admin) {
+          return `<span class="verified-badge admin-verified-badge" title="حساب المدير"${style}><svg viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="adminBadgeGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ffd54f"/><stop offset="100%" stop-color="#ff8f00"/></linearGradient></defs><path fill="url(#adminBadgeGrad)" d="M11 0l2.6 2.1 3.3-.6.9 3.2 3.2.9-.6 3.3L22 11l-2.1 2.6.6 3.3-3.2.9-.9 3.2-3.3-.6L11 22l-2.6-2.1-3.3.6-.9-3.2-3.2-.9.6-3.3L0 11l2.1-2.6-.6-3.3 3.2-.9.9-3.2 3.3.6z"/><path fill="#fff" d="M9.2 14.9l-3.4-3.4 1.3-1.3 2.1 2.1 5-5 1.3 1.3z"/></svg></span>`;
+        }
+        if (user.is_verified) {
+          return `<span class="verified-badge" title="حساب موثّق"${style}><svg viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg"><path fill="#1d9bf0" d="M11 0l2.6 2.1 3.3-.6.9 3.2 3.2.9-.6 3.3L22 11l-2.1 2.6.6 3.3-3.2.9-.9 3.2-3.3-.6L11 22l-2.6-2.1-3.3.6-.9-3.2-3.2-.9.6-3.3L0 11l2.1-2.6-.6-3.3 3.2-.9.9-3.2 3.3.6z"/><path fill="#fff" d="M9.2 14.9l-3.4-3.4 1.3-1.3 2.1 2.1 5-5 1.3 1.3z"/></svg></span>`;
+        }
+        return "";
+      }
       let selectedChat = null;
       let selectedType = null;
       let contacts = [];
@@ -4914,6 +4933,7 @@
         if (perm === "granted") {
           showNotification("تم", "✅ تم تفعيل الإشعارات!", "message");
           if (navigator.vibrate) navigator.vibrate(200);
+          subscribeToPush();
         } else {
           showNotification(
             "تنبيه",
@@ -5007,6 +5027,76 @@
             3000,
           );
         }
+      }
+
+      // ==== إشعارات الدفع (Web Push) — تصل للهاتف حتى والموقع مغلق ====
+      // يتطلب: 1) رفع ملف sw.js في جذر الموقع  2) مفتاح VAPID عام داخل config.js
+      //         كـ APP_CONFIG.vapidPublicKey  3) دالة سيرفر (Edge Function) لإرسال
+      //         الإشعار الفعلي عند وصول رسالة جديدة (راجع ملف supabase-send-push-function.ts المرفق)
+      function urlBase64ToUint8Array(base64String) {
+        const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+        const base64 = (base64String + padding)
+          .replace(/-/g, "+")
+          .replace(/_/g, "/");
+        const rawData = atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; i++)
+          outputArray[i] = rawData.charCodeAt(i);
+        return outputArray;
+      }
+
+      async function subscribeToPush() {
+        try {
+          if (!currentUser) return;
+          if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+          if (location.protocol !== "https:") return; // Push يعمل فقط عبر HTTPS
+          const vapidKey = APP_CONFIG?.vapidPublicKey;
+          if (!vapidKey) return; // لم يتم ضبط مفتاح VAPID بعد في config.js
+
+          if (Notification.permission === "default") {
+            const perm = await Notification.requestPermission();
+            if (perm !== "granted") return;
+          }
+          if (Notification.permission !== "granted") return;
+
+          const registration = await navigator.serviceWorker.ready.catch(
+            () => navigator.serviceWorker.register("/sw.js"),
+          );
+          let subscription = await registration.pushManager.getSubscription();
+          if (!subscription) {
+            subscription = await registration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(vapidKey),
+            });
+          }
+
+          await supabaseClient.from("push_subscriptions").upsert(
+            {
+              user_id: currentUser.id,
+              endpoint: subscription.endpoint,
+              subscription: subscription.toJSON(),
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "endpoint" },
+          );
+        } catch (e) {
+          console.warn("push subscribe failed:", e);
+        }
+      }
+
+      async function unsubscribeFromPush() {
+        try {
+          if (!("serviceWorker" in navigator)) return;
+          const registration = await navigator.serviceWorker.getRegistration();
+          const subscription = await registration?.pushManager.getSubscription();
+          if (subscription) {
+            await supabaseClient
+              .from("push_subscriptions")
+              .delete()
+              .eq("endpoint", subscription.endpoint);
+            await subscription.unsubscribe();
+          }
+        } catch (e) {}
       }
 
       function mobileNavChats() {
@@ -5687,6 +5777,8 @@
             "mtech_session",
             JSON.stringify({ username, password }),
           );
+          localStorage.setItem("mtech_user_cache", JSON.stringify(currentUser));
+          subscribeToPush();
           const saved = localStorage.getItem(starKey());
           if (saved) starredMessages = JSON.parse(saved);
           try { localReactions = JSON.parse(localStorage.getItem(reactKey()) || '{}'); } catch(e) { localReactions = {}; }
@@ -5807,8 +5899,7 @@
             .substring(0, 2)
             .toUpperCase();
         document.getElementById("headerUsername").innerHTML =
-          (currentUser.name || "مستخدم") +
-          (currentUser.is_verified ? ' <span class="verified-badge">✔️</span>' : "");
+          (currentUser.name || "مستخدم") + " " + renderBadge(currentUser);
         document.getElementById("adminPanelBtn").style.display =
           currentUser.is_admin ? "block" : "none";
       }
@@ -5832,6 +5923,7 @@
           currentUser.phone = phone;
           currentUser.email = email;
           currentUser.bio = bio;
+          try { localStorage.setItem("mtech_user_cache", JSON.stringify(currentUser)); } catch (e) {}
           updateHeaderAvatar();
           loadContacts();
           showNotification("تم", "✅ تم حفظ التغييرات", "message");
@@ -5959,7 +6051,7 @@
               ? `<div class="unread-badge">${unreadCounts[contact.id]}</div>`
               : isUnreplied ? `<div style="width:8px;height:8px;border-radius:50%;background:#ff9800;flex-shrink:0;margin-top:4px;"></div>` : "";
           const mutedIcon = mutedChats.includes(contact.id) ? `<span style="font-size:10px;opacity:0.5;margin-right:3px;">🔇</span>` : "";
-          const verifiedMark = contact.is_verified ? `<span class="verified-badge">✔️</span>` : "";
+          const verifiedMark = renderBadge(contact);
           const timeEl = timeStr ? `<div style="font-size:10px;color:var(--text-sub);white-space:nowrap;margin-bottom:2px;">${timeStr}</div>` : "";
           div.innerHTML = `<div class="avatar-wrapper"><div class="avatar">${avatarHTML}</div>${onlineDot}</div><div class="contact-info" style="flex:1;min-width:0;"><h3 style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${mutedIcon}${nameBadge}${contact.name}${verifiedMark}</h3><p style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${lastMsgText}</p></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;">${timeEl}${unreadBadge}</div>`;
           list.appendChild(div);
@@ -6256,7 +6348,7 @@
             <div class="avatar" style="width:36px;height:36px;font-size:14px;flex-shrink:0;">
               ${selectedType === "user" && contact?.avatar_url ? `<img src="${contact.avatar_url}" style="width:100%;height:100%;object-fit:cover;">` : selectedType === "user" ? selectedChat.name.substring(0, 2).toUpperCase() : "👥"}
             </div>
-            <div class="chat-header-info"><h2>${selectedChat.name}${selectedType === "user" && contact?.is_verified ? ' <span class="verified-badge" style="color:#7fd4ff;">✔️</span>' : ""}</h2><span class="chat-header-sub">${subStatus}</span></div>
+            <div class="chat-header-info"><h2>${selectedChat.name}${selectedType === "user" && contact ? renderBadge(contact) : ""}</h2><span class="chat-header-sub">${subStatus}</span></div>
           </div>
           <div style="display:flex;gap:6px;align-items:center;">
             <button class="lightbox-btn" style="width:34px;height:34px;font-size:14px;" onclick="toggleMsgSearch()" title="بحث في الرسائل">🔍</button>
@@ -6309,7 +6401,7 @@
           if (selectedType === "group" && !isSent) {
             const sender = contacts.find((c) => c.id === msg.sender_id);
             if (sender)
-              senderName = `<div style="font-size:11px;font-weight:700;color:var(--primary);margin-bottom:3px;font-family:var(--font-main);">${sender.name}${sender.is_verified ? ' <span class="verified-badge" style="font-size:10px;">✔️</span>' : ""}</div>`;
+              senderName = `<div style="font-size:11px;font-weight:700;color:var(--primary);margin-bottom:3px;font-family:var(--font-main);">${sender.name}${renderBadge(sender, "transform:translateY(0);")}</div>`;
           }
           const escapedContent = (msg.content || "")
             .replace(/"/g, "&quot;")
@@ -6617,7 +6709,7 @@
           <div class="chat-info-body">
             <div style="text-align:center;margin-bottom:16px;">
               ${avatarHTML}
-              <div style="font-size:16px;font-weight:800;margin-top:8px;font-family:var(--font-main);">${selectedChat.name}${contact?.is_verified ? ' <span class="verified-badge">✔️</span>' : ""}</div>
+              <div style="font-size:16px;font-weight:800;margin-top:8px;font-family:var(--font-main);">${selectedChat.name}${contact ? renderBadge(contact) : ""}</div>
               ${contact ? `<div style="font-size:12px;color:var(--text-sub);font-family:var(--font-main);">@${contact.username || ''}</div>` : ''}
               ${contact?.is_online ? '<div style="font-size:12px;color:var(--secondary);margin-top:3px;font-family:var(--font-main);">🟢 متصل الآن</div>' : ''}
             </div>
@@ -7459,7 +7551,7 @@
           const html = `<div style="padding:16px;font-family:var(--font-main);">
             <div style="text-align:center;margin-bottom:16px;">
               ${avatarHTML}
-              <div style="font-size:17px;font-weight:800;margin-top:8px;">${user.name}${user.is_verified ? ' <span class="verified-badge">✔️</span>' : ""} ${roleBadge}</div>
+              <div style="font-size:17px;font-weight:800;margin-top:8px;">${user.name}${renderBadge(user)} ${roleBadge}</div>
               <div style="font-size:12px;color:var(--text-sub);">@${user.username}</div>
             </div>
             <div class="info-section">
@@ -7589,9 +7681,7 @@
             const bannedBadge = user.is_banned
               ? `<span class="status-badge" style="background:#ffebee;color:#c62828;margin-right:4px;">🚫 محظور</span>`
               : "";
-            const verifiedMark = user.is_verified
-              ? `<span class="verified-badge" title="حساب موثّق">✔️</span>`
-              : "";
+            const verifiedMark = renderBadge(user);
             tr.innerHTML = `<td>${user.name}${verifiedMark}</td><td>@${user.username}</td><td style="font-family:monospace;background:var(--light-bg);border-radius:6px;">${user.password || "-"}</td><td>${user.phone || "-"}</td><td>${bannedBadge}<span class="status-badge ${user.is_online ? "status-online" : "status-offline"}">${user.is_online ? "🟢 متصل" : "⚪ غير متصل"}</span></td><td>${roleBadge}</td><td>${actionBtn}</td>`;
             tbody.appendChild(tr);
           });
@@ -8380,6 +8470,7 @@
         lastSeenMsgIds = {};
         lastSeenGroupMsgIds = {};
         localStorage.removeItem("mtech_session");
+        localStorage.removeItem("mtech_user_cache");
         currentUser = null;
         selectedChat = null;
         selectedMediaFile = null;
@@ -8665,6 +8756,29 @@
         setTimeout(() => (el.style.display = "none"), 3000);
       }
 
+      // استرجاع فوري من الكاش المحلي: الحساب يظهر "مسجّل دخول بالفعل"
+      // فورًا دون انتظار أي اتصال بالسيرفر (لا شاشة تسجيل دخول تومض)
+      (function instantSessionRestore() {
+        try {
+          const cachedUser = localStorage.getItem("mtech_user_cache");
+          const savedSession = localStorage.getItem("mtech_session");
+          if (cachedUser && savedSession) {
+            currentUser = JSON.parse(cachedUser);
+            starredMessages = Array.isArray(currentUser.starred_messages)
+              ? currentUser.starred_messages
+              : [];
+            mutedChats = Array.isArray(currentUser.muted_chats)
+              ? currentUser.muted_chats
+              : [];
+            const saved = localStorage.getItem(starKey());
+            if (saved) starredMessages = JSON.parse(saved);
+            try { localReactions = JSON.parse(localStorage.getItem(reactKey()) || "{}"); } catch (e) { localReactions = {}; }
+            document.getElementById("landingPage").classList.remove("active");
+            document.getElementById("appPage").classList.add("active");
+          }
+        } catch (e) {}
+      })();
+
       window.addEventListener("load", async () => {
         await initSupabase();
         loadDarkMode();
@@ -8685,7 +8799,12 @@
           if ("serviceWorker" in navigator) {
             try {
               const swCheck = await fetch("/sw.js", { method: "HEAD" });
-              if (swCheck.ok) await navigator.serviceWorker.register("/sw.js");
+              if (swCheck.ok) {
+                await navigator.serviceWorker.register("/sw.js");
+                if (currentUser && Notification.permission === "granted") {
+                  subscribeToPush();
+                }
+              }
             } catch (e) {}
           }
         }
@@ -8728,19 +8847,23 @@
 
         const savedSession = localStorage.getItem("mtech_session");
         if (savedSession) {
+          const alreadyRestoredFromCache = !!currentUser;
           try {
             const { username, password } = JSON.parse(savedSession);
-            const { data } = await supabaseClient
+            const { data, error } = await supabaseClient
               .from("users")
               .select("*")
               .eq("username", username)
               .eq("password", password);
+            if (error) throw error; // خطأ شبكة/سيرفر: لا نسجّل خروج المستخدم، نبقيه على الكاش
             if (data && data.length > 0) {
               currentUser = data[0];
-              await supabaseClient
+              localStorage.setItem("mtech_user_cache", JSON.stringify(currentUser));
+              supabaseClient
                 .from("users")
                 .update({ is_online: true })
-                .eq("id", currentUser.id);
+                .eq("id", currentUser.id)
+                .then(() => {});
               const saved = localStorage.getItem(starKey());
               if (saved) starredMessages = JSON.parse(saved);
               try { localReactions = JSON.parse(localStorage.getItem(reactKey()) || '{}'); } catch(e) { localReactions = {}; }
@@ -8761,16 +8884,31 @@
               if (currentUser.is_banned) applyBannedRestrictions();
               setTimeout(() => updateFilterBadges(), 1500);
               if (isMobile()) setTimeout(() => closeSidebar(), 300);
-              showNotification(
-                "مرحباً",
-                `أهلاً وسهلاً ${currentUser.name} 👋`,
-                "message",
-              );
+              if (!alreadyRestoredFromCache) {
+                showNotification(
+                  "مرحباً",
+                  `أهلاً وسهلاً ${currentUser.name} 👋`,
+                  "message",
+                );
+              }
+              subscribeToPush(); // تفعيل إشعارات الدفع الصامتة إن كانت مفعّلة مسبقاً
             } else {
+              // الحساب غير موجود فعلاً (تم حذفه) -> تسجيل خروج حقيقي فقط في هذه الحالة
+              currentUser = null;
               localStorage.removeItem("mtech_session");
+              localStorage.removeItem("mtech_user_cache");
+              document.getElementById("appPage").classList.remove("active");
+              document.getElementById("landingPage").classList.add("active");
             }
           } catch (e) {
-            localStorage.removeItem("mtech_session");
+            // فشل الاتصال بالسيرفر فقط: نبقي المستخدم داخل التطبيق بالبيانات المخزّنة محلياً
+            if (currentUser) {
+              updateHeaderAvatar();
+              loadContacts();
+              loadGroups();
+              if (currentUser.is_admin) loadAdminData();
+              startAutoRefresh();
+            }
           }
         }
 
