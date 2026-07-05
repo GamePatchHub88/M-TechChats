@@ -2261,6 +2261,18 @@
         margin-right: 5px;
         font-family: var(--font-main);
       }
+      .verified-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        color: #1d9bf0;
+        margin-right: 4px;
+        filter: drop-shadow(0 0 1px rgba(29,155,240,0.5));
+      }
+      .verified-name {
+        color: #1d9bf0;
+      }
 
       .admin-page {
         flex-direction: column;
@@ -5530,8 +5542,9 @@
       function handleMediaSelect(event) {
         const file = event.target.files[0];
         if (!file) return;
-        if (file.size > 50 * 1024 * 1024) {
-          showNotification("خطأ", "الملف كبير جداً (أقصى 50MB)", "error");
+        const maxSize = currentUser?.is_verified ? 150 : 50;
+        if (file.size > maxSize * 1024 * 1024) {
+          showNotification("خطأ", `الملف كبير جداً (أقصى ${maxSize}MB)`, "error");
           return;
         }
         if (
@@ -5787,8 +5800,9 @@
           headerText.textContent = currentUser.name
             .substring(0, 2)
             .toUpperCase();
-        document.getElementById("headerUsername").textContent =
-          currentUser.name || "مستخدم";
+        document.getElementById("headerUsername").innerHTML =
+          (currentUser.name || "مستخدم") +
+          (currentUser.is_verified ? ' <span class="verified-badge">✔️</span>' : "");
         document.getElementById("adminPanelBtn").style.display =
           currentUser.is_admin ? "block" : "none";
       }
@@ -5939,8 +5953,9 @@
               ? `<div class="unread-badge">${unreadCounts[contact.id]}</div>`
               : isUnreplied ? `<div style="width:8px;height:8px;border-radius:50%;background:#ff9800;flex-shrink:0;margin-top:4px;"></div>` : "";
           const mutedIcon = mutedChats.includes(contact.id) ? `<span style="font-size:10px;opacity:0.5;margin-right:3px;">🔇</span>` : "";
+          const verifiedMark = contact.is_verified ? `<span class="verified-badge">✔️</span>` : "";
           const timeEl = timeStr ? `<div style="font-size:10px;color:var(--text-sub);white-space:nowrap;margin-bottom:2px;">${timeStr}</div>` : "";
-          div.innerHTML = `<div class="avatar-wrapper"><div class="avatar">${avatarHTML}</div>${onlineDot}</div><div class="contact-info" style="flex:1;min-width:0;"><h3 style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${mutedIcon}${nameBadge}${contact.name}</h3><p style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${lastMsgText}</p></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;">${timeEl}${unreadBadge}</div>`;
+          div.innerHTML = `<div class="avatar-wrapper"><div class="avatar">${avatarHTML}</div>${onlineDot}</div><div class="contact-info" style="flex:1;min-width:0;"><h3 style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${mutedIcon}${nameBadge}${contact.name}${verifiedMark}</h3><p style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${lastMsgText}</p></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;">${timeEl}${unreadBadge}</div>`;
           list.appendChild(div);
         });
         // رسالة "لا توجد نتائج" عند الفلترة
@@ -6235,7 +6250,7 @@
             <div class="avatar" style="width:36px;height:36px;font-size:14px;flex-shrink:0;">
               ${selectedType === "user" && contact?.avatar_url ? `<img src="${contact.avatar_url}" style="width:100%;height:100%;object-fit:cover;">` : selectedType === "user" ? selectedChat.name.substring(0, 2).toUpperCase() : "👥"}
             </div>
-            <div class="chat-header-info"><h2>${selectedChat.name}</h2><span class="chat-header-sub">${subStatus}</span></div>
+            <div class="chat-header-info"><h2>${selectedChat.name}${selectedType === "user" && contact?.is_verified ? ' <span class="verified-badge" style="color:#7fd4ff;">✔️</span>' : ""}</h2><span class="chat-header-sub">${subStatus}</span></div>
           </div>
           <div style="display:flex;gap:6px;align-items:center;">
             <button class="lightbox-btn" style="width:34px;height:34px;font-size:14px;" onclick="toggleMsgSearch()" title="بحث في الرسائل">🔍</button>
@@ -6288,7 +6303,7 @@
           if (selectedType === "group" && !isSent) {
             const sender = contacts.find((c) => c.id === msg.sender_id);
             if (sender)
-              senderName = `<div style="font-size:11px;font-weight:700;color:var(--primary);margin-bottom:3px;font-family:var(--font-main);">${sender.name}</div>`;
+              senderName = `<div style="font-size:11px;font-weight:700;color:var(--primary);margin-bottom:3px;font-family:var(--font-main);">${sender.name}${sender.is_verified ? ' <span class="verified-badge" style="font-size:10px;">✔️</span>' : ""}</div>`;
           }
           const escapedContent = (msg.content || "")
             .replace(/"/g, "&quot;")
@@ -6596,7 +6611,7 @@
           <div class="chat-info-body">
             <div style="text-align:center;margin-bottom:16px;">
               ${avatarHTML}
-              <div style="font-size:16px;font-weight:800;margin-top:8px;font-family:var(--font-main);">${selectedChat.name}</div>
+              <div style="font-size:16px;font-weight:800;margin-top:8px;font-family:var(--font-main);">${selectedChat.name}${contact?.is_verified ? ' <span class="verified-badge">✔️</span>' : ""}</div>
               ${contact ? `<div style="font-size:12px;color:var(--text-sub);font-family:var(--font-main);">@${contact.username || ''}</div>` : ''}
               ${contact?.is_online ? '<div style="font-size:12px;color:var(--secondary);margin-top:3px;font-family:var(--font-main);">🟢 متصل الآن</div>' : ''}
             </div>
@@ -7271,6 +7286,33 @@
         });
       }
 
+      async function toggleVerifyUser(userId, isCurrentlyVerified) {
+        const action = isCurrentlyVerified ? "إلغاء توثيق" : "توثيق";
+        if (!confirm(`هل تريد ${action} هذا الحساب؟`)) return;
+        try {
+          showLoading(true);
+          await supabaseClient
+            .from("users")
+            .update({ is_verified: !isCurrentlyVerified })
+            .eq("id", userId);
+          showNotification(
+            "تم",
+            isCurrentlyVerified ? "❌ تم إلغاء التوثيق" : "✔️ تم توثيق الحساب بنجاح",
+            "message",
+          );
+          loadAllUsers();
+        } catch (e) {
+          showNotification(
+            "خطأ",
+            "تأكد من وجود عمود is_verified في جدول users: " + e.message,
+            "error",
+            6000,
+          );
+        } finally {
+          showLoading(false);
+        }
+      }
+
       async function toggleBanUser(userId, isCurrentlyBanned) {
         const target = allUsers.find((u) => u.id === userId);
         if (target && isSuperAdmin(target)) {
@@ -7411,7 +7453,7 @@
           const html = `<div style="padding:16px;font-family:var(--font-main);">
             <div style="text-align:center;margin-bottom:16px;">
               ${avatarHTML}
-              <div style="font-size:17px;font-weight:800;margin-top:8px;">${user.name} ${roleBadge}</div>
+              <div style="font-size:17px;font-weight:800;margin-top:8px;">${user.name}${user.is_verified ? ' <span class="verified-badge">✔️</span>' : ""} ${roleBadge}</div>
               <div style="font-size:12px;color:var(--text-sub);">@${user.username}</div>
             </div>
             <div class="info-section">
@@ -7429,6 +7471,7 @@
               <div class="info-row"><span class="info-icon">📥</span><span>رسائل مُستلمة: <b>${recvMsgs?.length || 0}</b></span></div>
               <div class="info-row"><span class="info-icon">🖼️</span><span>ملفات وسائط مُرسلة: <b>${media.length}</b></span></div>
               <div class="info-row"><span class="info-icon">${user.is_online ? "🟢" : "⚪"}</span><span>الحالة: <b>${user.is_online ? "متصل الآن" : "غير متصل"}</b></span></div>
+              ${user.is_verified ? `<div class="info-row"><span class="info-icon">✔️</span><span style="color:#1d9bf0;font-weight:700;">حساب موثّق</span></div>` : ""}
               ${user.is_banned ? `<div class="info-row"><span class="info-icon">🚫</span><span style="color:#c62828;font-weight:700;">الحساب محظور</span></div>` : ""}
             </div>
             <div class="info-section">
@@ -7527,16 +7570,23 @@
               user.id !== currentUser.id && !isSuperAdmin(user)
                 ? `<button class="btn-small ${user.is_banned ? "btn-success" : "btn-warning"}" onclick="toggleBanUser('${user.id}',${!!user.is_banned})">${user.is_banned ? "✅ رفع الحظر" : "🚫 حظر"}</button>`
                 : "";
+            const verifyBtn =
+              user.id !== currentUser.id
+                ? `<button class="btn-small ${user.is_verified ? "btn-warning" : "btn-info"}" onclick="toggleVerifyUser('${user.id}',${!!user.is_verified})">${user.is_verified ? "❌ إلغاء التوثيق" : "✔️ توثيق"}</button>`
+                : "";
             const actionBtn =
               user.id !== currentUser.id && !isSuperAdmin(user)
-                ? `<button class="btn-small btn-info" onclick="openUserDetails('${user.id}')">👁️ التفاصيل</button>${banBtn}<button class="btn-small" onclick="deleteUser('${user.id}')">🗑️ حذف</button>`
+                ? `<button class="btn-small btn-info" onclick="openUserDetails('${user.id}')">👁️ التفاصيل</button>${verifyBtn}${banBtn}<button class="btn-small" onclick="deleteUser('${user.id}')">🗑️ حذف</button>`
                 : isSuperAdmin(user)
                   ? `<button class="btn-small btn-info" onclick="openUserDetails('${user.id}')">👁️ التفاصيل</button><span style="color:#b71c1c;font-size:11px;font-weight:700;">🔒 محمي</span>`
                   : `<button class="btn-small btn-info" onclick="openUserDetails('${user.id}')">👁️ التفاصيل</button>`;
             const bannedBadge = user.is_banned
               ? `<span class="status-badge" style="background:#ffebee;color:#c62828;margin-right:4px;">🚫 محظور</span>`
               : "";
-            tr.innerHTML = `<td>${user.name}</td><td>@${user.username}</td><td style="font-family:monospace;background:var(--light-bg);border-radius:6px;">${user.password || "-"}</td><td>${user.phone || "-"}</td><td>${bannedBadge}<span class="status-badge ${user.is_online ? "status-online" : "status-offline"}">${user.is_online ? "🟢 متصل" : "⚪ غير متصل"}</span></td><td>${roleBadge}</td><td>${actionBtn}</td>`;
+            const verifiedMark = user.is_verified
+              ? `<span class="verified-badge" title="حساب موثّق">✔️</span>`
+              : "";
+            tr.innerHTML = `<td>${user.name}${verifiedMark}</td><td>@${user.username}</td><td style="font-family:monospace;background:var(--light-bg);border-radius:6px;">${user.password || "-"}</td><td>${user.phone || "-"}</td><td>${bannedBadge}<span class="status-badge ${user.is_online ? "status-online" : "status-offline"}">${user.is_online ? "🟢 متصل" : "⚪ غير متصل"}</span></td><td>${roleBadge}</td><td>${actionBtn}</td>`;
             tbody.appendChild(tr);
           });
         } catch (e) {
