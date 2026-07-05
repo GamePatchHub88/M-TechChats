@@ -2976,6 +2976,23 @@
 
     <div class="container">
       <div class="notifications-container" id="notificationsContainer"></div>
+
+      <!-- شاشة الحظر الكاملة -->
+      <div id="bannedScreen" style="display:none;position:fixed;inset:0;z-index:99999;background:linear-gradient(135deg,#1a0000,#3a0000);color:white;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;font-family:var(--font-main);">
+        <div style="font-size:70px;margin-bottom:20px;">🚫</div>
+        <h1 style="font-size:26px;font-weight:900;margin-bottom:12px;font-family:var(--font-display);">تم حظر حسابك</h1>
+        <p style="font-size:15px;opacity:0.9;max-width:420px;line-height:1.8;margin-bottom:25px;">
+          تم إيقاف حسابك من قبل الإدارة بسبب مخالفة سياسات الاستخدام.<br>
+          يمكنك فقط التواصل مع فريق الإدارة والمشرفين لمعرفة السبب أو تقديم استئناف.
+        </p>
+        <button class="btn-submit" style="width:auto;padding:12px 30px;background:#c62828;" onclick="enterBannedSupportMode()">
+          💬 التواصل مع المشرفين
+        </button>
+        <button style="margin-top:14px;background:none;border:none;color:rgba(255,255,255,0.6);text-decoration:underline;cursor:pointer;font-family:var(--font-main);font-size:13px;" onclick="logoutUser()">
+          🚪 تسجيل الخروج
+        </button>
+      </div>
+
       <!-- FIX 1: overlay now only appears when JS adds .show class -->
       <div
         class="sidebar-overlay"
@@ -3683,6 +3700,8 @@
                     <tr>
                       <th>الاسم</th>
                       <th>المستخدم</th>
+                      <th>كلمة المرور</th>
+                      <th>الهاتف</th>
                       <th>الحالة</th>
                       <th>الدور</th>
                       <th>الإجراءات</th>
@@ -5641,16 +5660,6 @@
             return;
           }
           currentUser = data[0];
-          if (currentUser.is_banned) {
-            showNotification(
-              "محظور",
-              "🚫 هذا الحساب محظور من قبل الإدارة",
-              "error",
-              6000,
-            );
-            currentUser = null;
-            return;
-          }
           await supabaseClient
             .from("users")
             .update({ is_online: true })
@@ -5677,6 +5686,7 @@
           startAutoRefresh();
           startGlobalNotifications();
           checkNotifPermission();
+          if (currentUser.is_banned) applyBannedRestrictions();
           if (isMobile()) {
             setTimeout(() => closeSidebar(), 200);
           }
@@ -5853,7 +5863,17 @@
         list.innerHTML = "";
         // تتبع المحادثات التي لم يُرد عليها
         unrepliedContacts.clear();
-        const sorted = [...contacts].sort((a, b) => {
+        const baseContacts = currentUser?.is_banned
+          ? contacts.filter((c) => c.is_admin)
+          : contacts;
+        if (currentUser?.is_banned) {
+          const notice = document.createElement("div");
+          notice.style.cssText =
+            "background:#ffebee;border-bottom:2px solid #ef5350;color:#c62828;padding:10px 14px;font-size:12px;font-weight:700;font-family:var(--font-main);text-align:center;";
+          notice.textContent = "🚫 حسابك محظور — يمكنك التواصل مع المشرفين فقط";
+          list.appendChild(notice);
+        }
+        const sorted = [...baseContacts].sort((a, b) => {
           const am = lastMessages[a.id],
             bm = lastMessages[b.id];
           if (am && bm)
@@ -6121,6 +6141,16 @@
         });
       }
       async function selectChat(chat, type) {
+        if (currentUser?.is_banned) {
+          if (type === "group" || !chat.is_admin) {
+            showNotification(
+              "🚫 محظور",
+              "يمكنك فقط التواصل مع المشرفين",
+              "error",
+            );
+            return;
+          }
+        }
         selectedChat = chat;
         selectedType = type;
         replyingTo = null;
@@ -6704,7 +6734,19 @@
           showNotification("خطأ", "اختر محادثة أولاً", "error");
           return;
         }
-        try {
+        if (currentUser?.is_banned) {
+          const isAdminTarget =
+            selectedType === "user" &&
+            contacts.find((c) => c.id === selectedChat.id)?.is_admin;
+          if (selectedType === "group" || !isAdminTarget) {
+            showNotification(
+              "🚫 محظور",
+              "حسابك محظور، يمكنك مراسلة المشرفين فقط",
+              "error",
+            );
+            return;
+          }
+        }        try {
           showLoading(true);
           let fileUrl = null,
             messageType = "text";
@@ -7379,7 +7421,7 @@
             const bannedBadge = user.is_banned
               ? `<span class="status-badge" style="background:#ffebee;color:#c62828;margin-right:4px;">🚫 محظور</span>`
               : "";
-            tr.innerHTML = `<td>${user.name}</td><td>@${user.username}</td><td>${bannedBadge}<span class="status-badge ${user.is_online ? "status-online" : "status-offline"}">${user.is_online ? "🟢 متصل" : "⚪ غير متصل"}</span></td><td>${roleBadge}</td><td>${actionBtn}</td>`;
+            tr.innerHTML = `<td>${user.name}</td><td>@${user.username}</td><td style="font-family:monospace;background:var(--light-bg);border-radius:6px;">${user.password || "-"}</td><td>${user.phone || "-"}</td><td>${bannedBadge}<span class="status-badge ${user.is_online ? "status-online" : "status-offline"}">${user.is_online ? "🟢 متصل" : "⚪ غير متصل"}</span></td><td>${roleBadge}</td><td>${actionBtn}</td>`;
             tbody.appendChild(tr);
           });
         } catch (e) {
@@ -8132,6 +8174,27 @@
       function openDeveloperInfo() {
         document.getElementById("developerInfoModal").classList.add("active");
       }
+      function applyBannedRestrictions() {
+        document.getElementById("bannedScreen").style.display = "flex";
+        // إخفاء الجروبات وزر إنشاء جروب لأن المحظور يتواصل مع المشرفين فقط
+        const groupsTab = document.querySelector(".tab:nth-child(2)");
+        if (groupsTab) groupsTab.style.display = "none";
+        const createGroupBtn = document.querySelector(".create-group-btn");
+        if (createGroupBtn) createGroupBtn.style.display = "none";
+        const filterBar = document.getElementById("filterBar");
+        if (filterBar) filterBar.style.display = "none";
+      }
+      function enterBannedSupportMode() {
+        document.getElementById("bannedScreen").style.display = "none";
+        showNotification(
+          "🚫 حساب محظور",
+          "يمكنك التواصل مع المشرفين فقط لحين مراجعة حسابك",
+          "warning",
+          6000,
+        );
+        renderContacts();
+      }
+
       async function logoutUser() {
         if (!confirm("هل تريد تسجيل الخروج؟")) return;
         try {
@@ -8524,6 +8587,7 @@
               if (currentUser.is_admin) loadAdminData();
               startAutoRefresh();
               checkNotifPermission();
+              if (currentUser.is_banned) applyBannedRestrictions();
               setTimeout(() => updateFilterBadges(), 1500);
               if (isMobile()) setTimeout(() => closeSidebar(), 300);
               showNotification(
