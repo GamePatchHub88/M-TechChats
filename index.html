@@ -5235,7 +5235,8 @@
         // ④ حفظ في DB بشكل غير متزامن — البنية {emoji: {userId:1}}
         try {
           const table = selectedType === 'group' ? 'group_messages' : 'messages';
-          const { data: dbMsg } = await supabaseClient.from(table).select('reactions').eq('id', ctxTargetMsg.id).single();
+          const { data: dbMsg, error: selErr } = await supabaseClient.from(table).select('reactions').eq('id', ctxTargetMsg.id).single();
+          if (selErr) throw selErr;
           let dbR = dbMsg?.reactions || {};
           if (typeof dbR === 'string') { try { dbR = JSON.parse(dbR); } catch(e) { dbR = {}; } }
           // تأكد أن البنية صحيحة
@@ -5246,9 +5247,14 @@
           } else {
             dbR[emoji][userId] = 1;
           }
-          await supabaseClient.from(table).update({ reactions: dbR }).eq('id', ctxTargetMsg.id);
+          const { error: updErr, data: updData } = await supabaseClient.from(table).update({ reactions: dbR }).eq('id', ctxTargetMsg.id).select();
+          if (updErr) throw updErr;
+          if (!updData || updData.length === 0) {
+            showNotification('تنبيه', '⚠️ لم يتم حفظ التفاعل في قاعدة البيانات (تحقق من صلاحيات RLS أو عمود reactions)', 'warning', 4500);
+          }
         } catch(err) {
-          console.warn('reactions DB save failed (local still works):', err);
+          console.error('reactions DB save failed:', err);
+          showNotification('خطأ', '⚠️ التفاعل محفوظ محلياً فقط. السبب: ' + (err.message || 'تأكد من وجود عمود reactions وصلاحيات RLS'), 'error', 5000);
         }
       }
 
@@ -5775,6 +5781,7 @@
           loadGroups();
           if (currentUser.is_admin) loadAdminData();
           startAutoRefresh();
+          startHeartbeat();
           startGlobalNotifications();
           checkNotifPermission();
           if (currentUser.is_banned) applyBannedRestrictions();
@@ -6148,24 +6155,27 @@
       async function saveStarredToServer() {
         if (!currentUser) return;
         try {
-          await supabaseClient
+          const { error } = await supabaseClient
             .from("users")
             .update({ starred_messages: starredMessages })
             .eq("id", currentUser.id);
+          if (error) throw error;
         } catch (e) {
-          console.warn("saveStarredToServer failed:", e.message);
+          console.error("saveStarredToServer failed:", e.message);
+          showNotification("خطأ", "⚠️ لم يُحفظ المفضّل في القاعدة: " + e.message, "error", 5000);
         }
       }
 
       async function saveMutedToServer() {
         if (!currentUser) return;
         try {
-          await supabaseClient
+          const { error } = await supabaseClient
             .from("users")
             .update({ muted_chats: mutedChats })
             .eq("id", currentUser.id);
+          if (error) throw error;
         } catch (e) {
-          console.warn("saveMutedToServer failed:", e.message);
+          console.error("saveMutedToServer failed:", e.message);
         }
       }
 
@@ -6334,6 +6344,7 @@
             <button class="lightbox-btn" style="width:34px;height:34px;font-size:14px;" onclick="toggleMsgSearch()" title="بحث في الرسائل">🔍</button>
             <button class="lightbox-btn" style="width:34px;height:34px;font-size:14px;" onclick="showChatInfo()" title="معلومات المحادثة">ℹ️</button>
             <button class="lightbox-btn" style="width:34px;height:34px;font-size:14px;" onclick="clearChatView()" title="مسح العرض">🧹</button>
+            <button class="lightbox-btn" style="width:34px;height:34px;font-size:14px;" onclick="copyChatLink()" title="نسخ رابط المحادثة">🔗</button>
             ${selectedType === "group" && (selectedChat.created_by === currentUser.id || currentUser.is_admin) ? `<button class="btn-small" style="padding:6px 12px;font-size:12px;" onclick="openEditGroupModal()">✏️ تعديل</button>` : ""}
           </div>`;
 
@@ -8484,6 +8495,39 @@
         return false;
       }
 
+      // نبضة دورية تحافظ على حالة "متصل الآن" دقيقة حتى مع إغلاق التاب فجأة
+      let heartbeatInterval = null;
+      function startHeartbeat() {
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
+        heartbeatInterval = setInterval(async () => {
+          if (currentUser && document.visibilityState === "visible") {
+            try {
+              await supabaseClient
+                .from("users")
+                .update({ is_online: true })
+                .eq("id", currentUser.id);
+            } catch (e) {}
+          }
+        }, 20000);
+      }
+
+      // نسخ رابط مباشر للمحادثة الحالية لمشاركتها بسرعة
+      function copyChatLink() {
+        if (!selectedChat) {
+          showNotification("تنبيه", "اختر محادثة أولاً", "warning", 2000);
+          return;
+        }
+        const url = `${location.origin}${location.pathname}?open=${selectedType}_${selectedChat.id}`;
+        navigator.clipboard
+          .writeText(url)
+          .then(() =>
+            showNotification("تم", "🔗 تم نسخ رابط المحادثة", "message", 2000),
+          )
+          .catch(() =>
+            showNotification("خطأ", "تعذر نسخ الرابط", "error", 2000),
+          );
+      }
+
       function startAutoRefresh() {
         if (autoRefreshInterval) clearInterval(autoRefreshInterval);
         autoRefreshInterval = setInterval(async () => {
@@ -8862,6 +8906,7 @@
               loadGroups();
               if (currentUser.is_admin) loadAdminData();
               startAutoRefresh();
+              startHeartbeat();
               checkNotifPermission();
               if (currentUser.is_banned) applyBannedRestrictions();
               setTimeout(() => updateFilterBadges(), 1500);
@@ -8890,6 +8935,7 @@
               loadGroups();
               if (currentUser.is_admin) loadAdminData();
               startAutoRefresh();
+              startHeartbeat();
             }
           }
         }
