@@ -6134,7 +6134,7 @@
           const mutedIcon = mutedChats.includes(contact.id) ? `<span style="font-size:10px;opacity:0.5;margin-right:3px;">🔇</span>` : "";
           const verifiedMark = renderBadge(contact);
           const timeEl = timeStr ? `<div style="font-size:10px;color:var(--text-sub);white-space:nowrap;margin-bottom:2px;">${timeStr}</div>` : "";
-          div.innerHTML = `<div class="avatar-wrapper"><div class="avatar">${avatarHTML}</div>${onlineDot}</div><div class="contact-info" style="flex:1;min-width:0;"><h3 style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${mutedIcon}${nameBadge}${contact.name}${verifiedMark}</h3><p style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${lastMsgText}</p></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;">${timeEl}${unreadBadge}</div>`;
+          div.innerHTML = `<div class="avatar-wrapper"><div class="avatar">${avatarHTML}</div>${onlineDot}</div><div class="contact-info" style="flex:1;min-width:0;"><h3 style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${mutedIcon}${nameBadge}${contact.name}${verifiedMark}</h3><div style="font-size:11px;color:var(--primary);opacity:0.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;">@${contact.username}</div><p style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${lastMsgText}</p></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;">${timeEl}${unreadBadge}</div>`;
           list.appendChild(div);
         });
         // رسالة "لا توجد نتائج" عند الفلترة
