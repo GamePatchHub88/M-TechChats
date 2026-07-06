@@ -3275,13 +3275,23 @@
       <div class="profile-page" id="profilePage">
         <div class="profile-header">
           <h2>👤 الملف الشخصي</h2>
-          <button
-            class="btn-submit"
-            style="width: auto; padding: 8px 16px"
-            onclick="goToApp()"
-          >
-            ← العودة
-          </button>
+          <div style="display:flex;gap:8px;">
+            <button
+              class="btn-submit"
+              style="width: auto; padding: 8px 14px; background: rgba(255,255,255,0.2);"
+              onclick="copyPageLink('profile')"
+              title="نسخ رابط مباشر"
+            >
+              🔗
+            </button>
+            <button
+              class="btn-submit"
+              style="width: auto; padding: 8px 16px"
+              onclick="goToApp()"
+            >
+              ← العودة
+            </button>
+          </div>
         </div>
         <div class="profile-content">
           <div class="profile-card">
@@ -3583,13 +3593,23 @@
       <div class="admin-page" id="adminPage">
         <div class="admin-header">
           <h2>🛡️ لوحة التحكم الإدارية</h2>
-          <button
-            class="btn-submit"
-            style="width: auto; padding: 8px 16px"
-            onclick="closeAdminPanel()"
-          >
-            ← العودة
-          </button>
+          <div style="display:flex;gap:8px;">
+            <button
+              class="btn-submit"
+              style="width: auto; padding: 8px 14px; background: rgba(255,255,255,0.2);"
+              onclick="copyPageLink('admin')"
+              title="نسخ رابط مباشر"
+            >
+              🔗
+            </button>
+            <button
+              class="btn-submit"
+              style="width: auto; padding: 8px 16px"
+              onclick="closeAdminPanel()"
+            >
+              ← العودة
+            </button>
+          </div>
         </div>
         <div class="admin-tabs">
           <div class="admin-tab active" onclick="switchAdminTab('dashboard')">
@@ -5777,14 +5797,15 @@
           document.getElementById("loginPage").classList.remove("active");
           document.getElementById("appPage").classList.add("active");
           updateHeaderAvatar();
-          loadContacts();
-          loadGroups();
+          await loadContacts();
+          await loadGroups();
           if (currentUser.is_admin) loadAdminData();
           startAutoRefresh();
           startHeartbeat();
           startGlobalNotifications();
           checkNotifPermission();
           if (currentUser.is_banned) applyBannedRestrictions();
+          resolveDeepLink();
           if (isMobile()) {
             setTimeout(() => closeSidebar(), 200);
           }
@@ -6258,6 +6279,12 @@
         selectedType = type;
         replyingTo = null;
         pinnedMessage = null;
+        try {
+          const newUrl = `${location.pathname}?open=${type}_${chat.id}`;
+          if (location.search !== `?open=${type}_${chat.id}`) {
+            history.pushState({ open: `${type}_${chat.id}` }, "", newUrl);
+          }
+        } catch (e) {}
         if (type === "user") {
           unreadCounts[chat.id] = 0;
           // إعادة تعيين آخر رسالة مشاهدة لمنع إشعارات مكررة
@@ -8528,6 +8555,100 @@
           );
       }
 
+      // نسخ رابط مباشر لأي صفحة داخلية (بروفايل/لوحة تحكم/بيانات المطور)
+      function copyPageLink(page) {
+        const url = `${location.origin}${location.pathname}?open=${page}`;
+        navigator.clipboard
+          .writeText(url)
+          .then(() => showNotification("تم", "🔗 تم نسخ الرابط", "message", 2000))
+          .catch(() => showNotification("خطأ", "تعذر نسخ الرابط", "error", 2000));
+      }
+
+      // ===== نظام الروابط الداخلية (Deep Linking) =====
+      // يقرأ ?open=... من الرابط ويفتح المحتوى المطابق: محادثة مستخدم/جروب،
+      // أو صفحات مثل profile / admin / developer
+      let _deepLinkHandled = false;
+      async function resolveDeepLink() {
+        if (!currentUser) return;
+        const params = new URLSearchParams(location.search);
+        const openParam = params.get("open");
+        if (!openParam) return;
+        try {
+          if (openParam === "profile") {
+            openProfile();
+          } else if (openParam === "admin") {
+            if (currentUser.is_admin) openAdminPanel();
+          } else if (openParam === "developer") {
+            openDeveloperInfo();
+          } else if (openParam.startsWith("user_")) {
+            const userId = openParam.replace("user_", "");
+            let target = contacts.find((c) => String(c.id) === userId);
+            if (!target) {
+              // لو المستخدم مش محمّل في contacts بعد، هات بياناته مباشرة
+              const { data } = await supabaseClient
+                .from("users")
+                .select("*")
+                .eq("id", userId)
+                .single();
+              target = data;
+            }
+            if (target) {
+              switchTabTo("chats");
+              setMobileNavActive("navChats");
+              await selectChat(target, "user");
+            } else {
+              showNotification(
+                "تنبيه",
+                "لم يتم العثور على هذه المحادثة",
+                "warning",
+                3000,
+              );
+            }
+          } else if (openParam.startsWith("group_")) {
+            const groupId = openParam.replace("group_", "");
+            let target = groups.find((g) => String(g.id) === groupId);
+            if (!target) {
+              const { data } = await supabaseClient
+                .from("groups")
+                .select("*")
+                .eq("id", groupId)
+                .single();
+              target = data;
+            }
+            if (target) {
+              switchTabTo("groups");
+              setMobileNavActive("navGroups");
+              await selectChat(target, "group");
+            } else {
+              showNotification(
+                "تنبيه",
+                "لم يتم العثور على هذا الجروب أو لست عضواً فيه",
+                "warning",
+                3000,
+              );
+            }
+          }
+        } catch (e) {
+          console.error("resolveDeepLink error:", e);
+        }
+      }
+
+      // دعم أزرار التنقل للخلف/للأمام في المتصفح
+      window.addEventListener("popstate", (e) => {
+        if (!currentUser) return;
+        const state = e.state?.open;
+        if (!state) return;
+        if (state.startsWith("user_")) {
+          const id = state.replace("user_", "");
+          const target = contacts.find((c) => String(c.id) === id);
+          if (target) selectChat(target, "user");
+        } else if (state.startsWith("group_")) {
+          const id = state.replace("group_", "");
+          const target = groups.find((g) => String(g.id) === id);
+          if (target) selectChat(target, "group");
+        }
+      });
+
       function startAutoRefresh() {
         if (autoRefreshInterval) clearInterval(autoRefreshInterval);
         autoRefreshInterval = setInterval(async () => {
@@ -8902,8 +9023,8 @@
               document.getElementById("landingPage").classList.remove("active");
               document.getElementById("appPage").classList.add("active");
               updateHeaderAvatar();
-              loadContacts();
-              loadGroups();
+              await loadContacts();
+              await loadGroups();
               if (currentUser.is_admin) loadAdminData();
               startAutoRefresh();
               startHeartbeat();
@@ -8919,6 +9040,7 @@
                 );
               }
               subscribeToPush(); // تفعيل إشعارات الدفع الصامتة إن كانت مفعّلة مسبقاً
+              resolveDeepLink();
             } else {
               // الحساب غير موجود فعلاً (تم حذفه) -> تسجيل خروج حقيقي فقط في هذه الحالة
               currentUser = null;
@@ -8931,11 +9053,12 @@
             // فشل الاتصال بالسيرفر فقط: نبقي المستخدم داخل التطبيق بالبيانات المخزّنة محلياً
             if (currentUser) {
               updateHeaderAvatar();
-              loadContacts();
-              loadGroups();
+              await loadContacts();
+              await loadGroups();
               if (currentUser.is_admin) loadAdminData();
               startAutoRefresh();
               startHeartbeat();
+              resolveDeepLink();
             }
           }
         }
