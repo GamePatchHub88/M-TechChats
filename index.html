@@ -2990,6 +2990,44 @@
       /* online count badge */
       #onlineCountBadge { font-size: 10px; opacity: 0.85; }
 
+      /* ====== تحسينات الثيم الإضافية (آمنة/إضافية فقط) ====== */
+      .btn-submit, .btn-small, .send-btn, .send-btn, .lightbox-btn:hover {
+        transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+      }
+      .btn-submit:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(15,138,122,0.28); }
+      .btn-submit:active { transform: translateY(0); }
+      .contact-item, .message, .modal-content, .notification, .in-app-notif {
+        transition: background 0.15s ease;
+      }
+      .avatar, .profile-avatar-large, .avatar-wrapper .avatar {
+        box-shadow: 0 0 0 2px rgba(255,255,255,0.5), 0 2px 8px rgba(0,0,0,0.12);
+      }
+      [data-theme="dark"] .avatar, [data-theme="dark"] .profile-avatar-large {
+        box-shadow: 0 0 0 2px rgba(0,0,0,0.3), 0 2px 8px rgba(0,0,0,0.35);
+      }
+      .message-content { transition: box-shadow 0.15s ease; }
+      .message:hover .message-content { box-shadow: 0 2px 8px var(--shadow); }
+      .sidebar-header { position: relative; overflow: hidden; }
+      .sidebar-header::after {
+        content: "";
+        position: absolute; inset: 0;
+        background: linear-gradient(120deg, rgba(255,255,255,0.08), transparent 60%);
+        pointer-events: none;
+      }
+      .tab.active { position: relative; }
+      .tab.active::after {
+        content: "";
+        position: absolute; bottom: -1px; left: 50%; transform: translateX(-50%);
+        width: 40%; height: 3px; border-radius: 3px;
+        background: var(--primary);
+      }
+      .modal-content { box-shadow: 0 20px 60px rgba(0,0,0,0.25); }
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-thumb { background: rgba(18,140,126,0.25); border-radius: 8px; }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(18,140,126,0.45); }
+      ::-webkit-scrollbar-track { background: transparent; }
+      [data-theme="dark"] ::-webkit-scrollbar-thumb { background: rgba(37,211,102,0.2); }
+
     </style>
     <!-- OneSignal: إشعارات Push تصل حتى لو الموقع مقفول -->
     <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
@@ -3502,13 +3540,21 @@
               onkeyup="searchContacts(this.value)"
             />
           </div>
-          <div class="create-group-btn">
+          <div class="create-group-btn" style="display:flex;gap:8px;">
             <button
               class="btn-submit"
-              style="width: 100%; margin: 0"
+              style="flex:1; margin: 0"
               onclick="openCreateGroupModal()"
             >
               ➕ جروب جديد
+            </button>
+            <button
+              class="btn-submit"
+              style="flex:1; margin: 0; background:#1565c0;"
+              onclick="openStartChatByUsernameModal()"
+              title="تواصل مباشرة عبر اسم المستخدم"
+            >
+              @ تواصل بيوزر
             </button>
           </div>
           <div class="tabs">
@@ -3912,6 +3958,28 @@
           <div id="genericModalBody" style="max-height:60vh;overflow-y:auto;"></div>
         </div>
       </div>
+      <div class="modal" id="startChatUsernameModal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>@ تواصل بيوزر نيم</h2>
+            <button onclick="closeModal('startChatUsernameModal')">✕</button>
+          </div>
+          <div class="form-group">
+            <label>اسم المستخدم (بدون @)</label>
+            <input
+              type="text"
+              id="startChatUsernameInput"
+              placeholder="مثال: mohamed_helmy"
+              onkeypress="if(event.key==='Enter'){event.preventDefault();startChatByUsername();}"
+            />
+          </div>
+          <div id="startChatUsernameMsg" class="message-box" style="display:none;"></div>
+          <button type="button" class="btn-submit" style="background:#1565c0;" onclick="startChatByUsername()">
+            🚀 بدء المحادثة
+          </button>
+        </div>
+      </div>
+
       <div class="modal" id="createGroupModal">
         <div class="modal-content">
           <div class="modal-header">
@@ -4754,6 +4822,11 @@
 
       let supabaseClient = null;
       let currentUser = null;
+
+      // يهرّب رموز LIKE/ILIKE الخاصة (% و _) حتى لا تُعامل كـ wildcards عند البحث عن يوزر نيم يحتوي عليها
+      function escapeLike(str) {
+        return String(str).replace(/[%_]/g, (m) => "\\" + m);
+      }
 
       // شارة موحّدة: شارة ذهبية للمدير، وشارة زرقاء للحساب الموثّق
       function renderBadge(user, extraStyle) {
@@ -5847,7 +5920,7 @@
           const { data: existing } = await supabaseClient
             .from("users")
             .select("id")
-            .eq("username", username);
+            .ilike("username", escapeLike(username));
           if (existing && existing.length > 0) {
             showNotification("خطأ", "اسم المستخدم موجود بالفعل", "error");
             return;
@@ -6987,6 +7060,68 @@
         renderGroupMembersCheckboxes("newGroupMembers", []);
         document.getElementById("createGroupModal").classList.add("active");
       }
+
+      // ===== تواصل مباشر باستخدام اسم المستخدم =====
+      function openStartChatByUsernameModal() {
+        document.getElementById("startChatUsernameInput").value = "";
+        document.getElementById("startChatUsernameMsg").style.display = "none";
+        document.getElementById("startChatUsernameModal").classList.add("active");
+        setTimeout(
+          () => document.getElementById("startChatUsernameInput")?.focus(),
+          100,
+        );
+      }
+      async function startChatByUsername() {
+        const raw = document
+          .getElementById("startChatUsernameInput")
+          .value.trim()
+          .replace(/^@/, "");
+        if (!raw) {
+          showError("startChatUsernameMsg", "أدخل اسم المستخدم أولاً");
+          return;
+        }
+        if (raw.toLowerCase() === (currentUser?.username || "").toLowerCase()) {
+          showError("startChatUsernameMsg", "لا يمكنك مراسلة نفسك");
+          return;
+        }
+        try {
+          showLoading(true);
+          let target = contacts.find(
+            (c) => c.username?.toLowerCase() === raw.toLowerCase(),
+          );
+          if (!target) {
+            const { data, error } = await supabaseClient
+              .from("users")
+              .select("*")
+              .ilike("username", escapeLike(raw))
+              .limit(1);
+            if (error) throw error;
+            target = data && data[0];
+          }
+          if (!target) {
+            showError(
+              "startChatUsernameMsg",
+              "لا يوجد مستخدم بهذا الاسم: @" + raw,
+            );
+            return;
+          }
+          closeModal("startChatUsernameModal");
+          switchTabTo("chats");
+          setMobileNavActive("navChats");
+          await selectChat(target, "user");
+          showNotification(
+            "تم",
+            `💬 تم فتح المحادثة مع ${target.name}`,
+            "message",
+            2500,
+          );
+        } catch (e) {
+          showError("startChatUsernameMsg", "خطأ: " + e.message);
+        } finally {
+          showLoading(false);
+        }
+      }
+
       function renderGroupMembersCheckboxes(containerId, selectedMembers = []) {
         const container = document.getElementById(containerId);
         container.innerHTML = "";
@@ -7336,7 +7471,7 @@
           const { data: existing } = await supabaseClient
             .from("users")
             .select("id")
-            .eq("username", newUsername);
+            .ilike("username", escapeLike(newUsername));
           if (existing && existing.length > 0) {
             showError("usernameMessage", "اسم المستخدم موجود بالفعل");
             showLoading(false);
@@ -7983,7 +8118,7 @@
           const { data: existing } = await supabaseClient
             .from("users")
             .select("id")
-            .eq("username", username);
+            .ilike("username", escapeLike(username));
           if (existing && existing.length > 0) {
             showNotification("خطأ", "اسم المستخدم موجود بالفعل", "error");
             return;
@@ -8353,7 +8488,7 @@
           const { data: existing } = await supabaseClient
             .from("users")
             .select("id")
-            .eq("username", username);
+            .ilike("username", escapeLike(username));
           if (existing && existing.length > 0) {
             showError("adminMessage", "اسم المستخدم موجود بالفعل");
             showLoading(false);
